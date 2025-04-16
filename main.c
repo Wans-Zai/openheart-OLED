@@ -25,6 +25,8 @@
 #include "hardware/clocks.h"
 #include "hardware/pwm.h"
 #include "hardware/gpio.h"
+#include "ssd1306.h"
+#include "sega.h"
 
 #define GPIO_OC_LED_PIN 1
 #define GPIO_HALT_PIN 10        // !HALT pin of 68K
@@ -39,6 +41,8 @@
 #define GPIO_GREEN_LED 19
 #define GPIO_VCLK_PIN 20        // CPU clock, for overclocking, optional
 #define GPIO_MCLK_PIN 21        // To master oscillator clock in
+//#define GPIO_FUNC_I2C_PIN 4		//Screen Reservation
+//#define GPIO_FUNC_I2C_PIN 5		//Screen reservation
 
 #define PAD_A (1 << 0)
 #define PAD_B (1 << 1)
@@ -48,6 +52,10 @@
 #define FLASH_TARGET_OFFSET (256 * 1024)
 
 #define LED_WRAP 255
+
+#define DISPLAY_TIME 0       	 //0 seconds in miliseconds. Time logo will remain present as splash screen. Note delays console boot.
+
+ssd1306_t oled;
 
 enum {
     INVALID = 0x80,
@@ -82,6 +90,62 @@ static void call_flash_range_program(void *param) {
     uint32_t offset = ((uintptr_t*)param)[0];
     const uint8_t *data = (const uint8_t *)((uintptr_t*)param)[1];
     flash_range_program(offset, data, FLASH_PAGE_SIZE);
+}
+
+void drawJapan(ssd1306_t *pOled){
+	ssd1306_clear(pOled);  // Clear old content
+	drawSegaLogo(pOled, 0);
+	 if (oc_on) {
+        ssd1306_draw_string(pOled, 34, 2, 1, "OVERCLOCKED");
+    }
+	ssd1306_draw_string(pOled, 34, 42, 2, "JAPAN");
+	ssd1306_show(pOled);  // Push buffer to screen
+}
+
+void drawUSA(ssd1306_t *pOled){
+	ssd1306_clear(pOled);  // Clear old content
+	drawSegaLogo(pOled, 0);
+	 if (oc_on) {
+        ssd1306_draw_string(pOled, 34, 2, 1, "OVERCLOCKED");
+    }
+	ssd1306_draw_string(pOled, 46, 42, 2, "USA");
+	ssd1306_show(pOled);  // Push buffer to screen
+}
+
+void drawEurope(ssd1306_t *pOled){
+	ssd1306_clear(pOled);  // Clear old content
+	drawSegaLogo(pOled, 0);
+	 if (oc_on) {
+        ssd1306_draw_string(pOled, 34, 2, 1, "OVERCLOCKED");
+    }
+	ssd1306_draw_string(pOled, 28, 42, 2, "Europe");
+	ssd1306_show(pOled);  // Push buffer to screen
+}
+
+void updateRegionScreen(ssd1306_t *pOled, int region, bool oc_on) {
+    ssd1306_clear(pOled);
+    drawSegaLogo(pOled, 0);
+
+    switch(region) {
+        case JAPAN:
+            ssd1306_draw_string(pOled, 34, 42, 2, "JAPAN");
+            break;
+        case AMERICAS:
+            ssd1306_draw_string(pOled, 46, 42, 2, "USA");
+            break;
+        case EUROPE:
+            ssd1306_draw_string(pOled, 20, 42, 2, "Europe");
+            break;
+		default:
+            ssd1306_draw_string(pOled, 28, 42, 2, "Unknown");
+            break;
+    }
+
+    if (oc_on) {
+        ssd1306_draw_string(pOled, 0, 0, 1, "OVERCLOCKED");
+    }
+
+    ssd1306_show(pOled);
 }
 
 void read_flash()
@@ -142,6 +206,7 @@ void set_japan()
     gpio_put(GPIO_STANDARD_PIN, true);
     gpio_put(GPIO_REGION_PIN, false);
     led_mode = 1;
+    drawJapan(&oled);
 }
 
 void set_americas()
@@ -151,6 +216,7 @@ void set_americas()
     gpio_put(GPIO_STANDARD_PIN, true);
     gpio_put(GPIO_REGION_PIN, true);
     led_mode = 2;
+    drawUSA(&oled);
 }
 
 void set_europe()
@@ -160,6 +226,7 @@ void set_europe()
     gpio_put(GPIO_STANDARD_PIN, false);
     gpio_put(GPIO_REGION_PIN, true);
     led_mode = 3;
+    drawEurope(&oled);
 }
 
 // (The HALT & RESET lines are open collector and
@@ -275,7 +342,30 @@ bool led_callback(struct repeating_timer *rt) {
 int main() {
     reset_on();
     // Do init while reset held down
+    // Setup the OLED Screen
+    i2c_init(i2c0, 400000);
+    gpio_pull_up(4);
+    gpio_pull_up(5);
+    gpio_set_function(4, GPIO_FUNC_I2C);
+    gpio_set_function(5, GPIO_FUNC_I2C);
+    oled.external_vcc = false;
 
+    bool res = ssd1306_init(
+        &oled,
+        128,
+        64,
+        0x3c,
+        i2c0
+    );
+	
+	if (res){			
+		drawSegaLogo(&oled, 0);
+		sleep_ms(DISPLAY_TIME);
+		ssd1306_clear(&oled);
+		ssd1306_show(&oled);
+	} else {
+		printf("Oled Init failed\n");
+	}
     // Set up gpio's
     // VRES
     gpio_init(GPIO_VRES_PIN);
@@ -397,6 +487,7 @@ int main() {
                 set_vclk_div((oc_on) ? 5 : 7);
                 halt_off();
                 gpio_put(GPIO_OC_LED_PIN, oc_on);
+                updateRegionScreen(&oled, config[0], oc_on);
             }
         }
         
